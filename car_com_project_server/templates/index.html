@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vehicle Status</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.1/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        table {
+            width: 60%;
+            border-collapse: collapse;
+            margin: 20px auto;
+        }
+        table, th, td {
+            border: 1px solid black;
+        }
+        th, td {
+            padding: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Vehicle Status</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Component</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Airbag Deployment</td>
+                <td id="airbag">-</td>
+            </tr>
+            <tr>
+                <td>Total Occupants</td>
+                <td id="occupants">-</td>
+            </tr>
+            <tr>
+                <td>Driver Seat</td>
+                <td id="driver_seat">-</td>
+            </tr>
+            <tr>
+                <td>Passenger Seat</td>
+                <td id="passenger_seat">-</td>
+            </tr>
+            <tr>
+                <td>Left Rear Seat</td>
+                <td id="left_rear_seat">-</td>
+            </tr>
+            <tr>
+                <td>Right Rear Seat</td>
+                <td id="right_rear_seat">-</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <script>
+        const socket = io();
+
+        // 서버로부터 데이터 수신
+        socket.on('update_data', (data) => {
+            console.log("Received data:", data); // 디버깅 출력
+            document.getElementById('airbag').innerText = data.airbag;
+            document.getElementById('occupants').innerText = data.occupants;
+            document.getElementById('driver_seat').innerText = data.driver_seat;
+            document.getElementById('passenger_seat').innerText = data.passenger_seat;
+            document.getElementById('left_rear_seat').innerText = data.left_rear_seat;
+            document.getElementById('right_rear_seat').innerText = data.right_rear_seat;
+        });
+    </script>
+</body>
+</html>

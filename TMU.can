@@ -1,0 +1,207 @@
+﻿/*@!Encoding:65001*/
+includes
+{
+}
+
+variables
+{
+  UdpSocket gSocket1;
+  UdpSocket gSocket2;
+  char gRxBuf1[1024];
+  char gRxBuf2[1024];
+  
+  int airbagDeployStatus = 0;
+  
+  int peopleCount = 1;
+  int driverSeat = 1;
+  int passengerSeat = 0;
+  int backSeatL = 0;
+  int backSeatR = 0;
+  
+  int fuel_category = 1; // 0 : 휘발유 , 1 : 경유
+  
+  char car_num[18] = "KNHEL44BPBA000001";
+
+  float car_direction_angle = 187.35;
+  
+  int longitude_doe = 127;
+  int longitude_bun = 5;
+  int longitude_choe = 2580;
+  
+  int latitude_doe = 37;
+  int latitude_bun = 12;
+  int latitude_choe = 321;
+  
+  struct _T_Location
+  {
+    int64 latitude;
+    int64 longitude;
+    dword angle;
+  };
+  
+  msTimer Periodic_GPS_Location; //위도, 경도, 방위각 정보를 IVI에 주기적으로 전송하는 타이머
+}
+
+on start
+{
+  gSocket1 = UdpSocket::Open(ip_Endpoint(192.168.1.33:8008));
+  gSocket2 = UdpSocket::Open(ip_Endpoint(192.168.201.30:8008));
+  gSocket1.ReceiveFrom(gRxBuf1, elcount(gRxBuf1));
+  gSocket2.ReceiveFrom(gRxBuf2, elcount(gRxBuf2));
+  setTimerCyclic(Periodic_GPS_Location, 100);
+}
+
+on preStop
+{
+  gSocket1.Close();
+  gSocket2.Close();
+}
+
+on timer Periodic_GPS_Location //주기적으로 IVI에 위도, 경도, 방위각을 전송
+{
+  char sendData[1024];
+  struct _T_Location lat_long; //위도, 경도, 방위각 정보를 저장하는 구조체
+  
+  //위도, 경도, 방위각 계산
+  int64 send_latitude;
+  int64 send_longitude;
+  dword send_angle;
+              
+  send_latitude = cal_GPS_Location(latitude_doe, latitude_bun, latitude_choe);
+  send_longitude = cal_GPS_Location(longitude_doe, longitude_bun, longitude_choe);
+  send_angle = car_direction_angle * 100;
+              
+  lat_long.latitude = send_latitude;
+  lat_long.longitude = send_longitude;
+  lat_long.angle = send_angle;
+  
+  sendData[0] = 1;
+  memcpy(sendData, 1, lat_long);
+  gSocket1.SendTo(ip_Endpoint(192.168.1.25:8012), sendData, 21);
+  gSocket1.ReceiveFrom(gRxBuf1, elcount(gRxBuf1));
+}
+
+int64 cal_GPS_Location(int doe, int bun, int choe)
+{
+  int64 result = 0;
+  result = (doe * 360000) + (bun * 6000) + choe;
+  return result;
+}
+
+void OnUdpReceiveFrom(UdpSocket socket, long result, 
+      IP_Endpoint remoteEndpoint, 
+      char buffer[], dword size)
+{
+  write("[TMU] UDP event hanlder start");
+  if(result == 0)
+  { 
+    byte ID;
+    byte payload;
+    char sendData[1000];
+    char sendGPS[1000];
+    int i = 0;
+    
+    ID = (byte)buffer[0];
+    payload = (byte)buffer[1];
+    
+    if(socket == gSocket1)
+    {
+      switch(ID)
+      {
+        case 12: //VCU_ECall_Act ON 메시지 수신, 게이트웨이를 통과하지 않고 스위치에서 바로 전송됨
+          {
+            if(payload == 1 && Ecall_Count == 0)
+            {
+              //위도, 경도, 방위각 계산
+              int64 send_latitude;
+              int64 send_longitude;
+              dword send_angle;
+              struct _T_Location lat_long; //위도, 경도, 방위각 정보를 저장하는 구조체
+
+              Ecall_Count = 1; //서버에 메시지 한번만 전송
+              
+              send_latitude = cal_GPS_Location(latitude_doe, latitude_bun, latitude_choe);
+              send_longitude = cal_GPS_Location(longitude_doe, longitude_bun, longitude_choe);
+              send_angle = car_direction_angle * 100;
+              
+              lat_long.latitude = send_latitude;
+              lat_long.longitude = send_longitude;
+              lat_long.angle = send_angle;
+              
+              //MSD 구조 : 에어백, 탑승 인원, 운전석 탑승 여부, 조수석 탑승 여부, 좌측 뒷자석 탑승 여부, 우측 뒷자석 탑승 여부, 차대번호
+              sendData[0] = airbagDeployStatus; //0
+              sendData[1] = peopleCount; //1
+              sendData[2] = driverSeat; //2
+              sendData[3] = passengerSeat; //3
+              sendData[4] = backSeatL; //4
+              sendData[5] = backSeatR; //5
+              for (i = 0; i < 17; i++) 
+              {
+                sendData[6 + i] = car_num[i]; // 6번째부터 차대번호 복사 //6 ~ 22
+              }
+              memcpy(sendData, 23, lat_long);
+              
+              write("[TMU] send MSD to Server");
+              write("[TMU] sending latitude : %d", lat_long.latitude);
+              gSocket2.SendTo(ip_Endpoint(192.168.201.24:9001), sendData, 43); //서버에 MSD 메시지 전송
+              break;
+            }
+            
+            break;
+          }
+          
+        case 14: //BCM_AirBag_state 수신
+          {
+            airbagDeployStatus = payload;
+            write("[TMU] airbag state received : %d", airbagDeployStatus);
+            break;
+          }
+          
+        case 15: //BCM_Seat_Count 수신
+          {
+            write("[TMU] BCM_Seat_Count received");
+            driverSeat = payload & 0x01;
+            passengerSeat = (payload >> 1) & 0x01;
+            backSeatL = (payload >> 2) & 0x01;
+            backSeatR = (payload >> 3) & 0x01;
+            
+            peopleCount = driverSeat + passengerSeat + backSeatL + backSeatR;
+            break;
+          }
+        
+        default:
+          break;
+      }
+      gSocket1.ReceiveFrom(gRxBuf1, elcount(gRxBuf1));
+    }
+    
+    else if(socket == gSocket2)
+    {
+      switch (ID)
+      {
+        case 9: //receive server sending ACK
+          sendData[0] = 9;
+          sendData[1] = 1;
+          
+          write("[TMU] server ack");
+          gSocket1.SendTo(ip_Endpoint(192.168.1.25:8012), sendData, 2);
+          break;
+        
+        case 8: //receive 119 server call
+          sendData[0] = 19;
+          sendData[1] = 1;
+          
+          write("[TMU] Reception of control center calls");
+          gSocket1.SendTo(ip_Endpoint(192.168.1.25:8012), sendData, 2);
+          break;
+          
+        default:
+          break;
+      }
+      
+      gSocket2.ReceiveFrom(gRxBuf1, elcount(gRxBuf1));
+    }
+  }
+}
+
+
